@@ -4,6 +4,7 @@ from collections import Counter
 from pathlib import Path
 
 from datasets import load_dataset
+from toxicity import TOXICITY_RULE, filter_toxicity
 
 
 def first_prompt(row):
@@ -15,13 +16,17 @@ def first_prompt(row):
 
 def is_first_user_turn(row):
     conversation = row.get("conversation") or []
-    return bool(conversation and conversation[0].get("role") == "user")
+    first_non_system_turn = next(
+        (turn.get("role") for turn in conversation if turn.get("role") != "system"),
+        None,
+    )
+    return first_non_system_turn == "user"
 
 
 RULES = {
+    "dataset_toxic": lambda row: row.get("toxic") is True,
     "not_first_user_turn": lambda row: not is_first_user_turn(row),
-    "non_english": lambda row: row.get("language") != "English",
-    "redacted": lambda row: bool(row.get("redacted")),
+    "non_english": lambda row: str(row.get("language") or "").strip().casefold() != "english",
     "too_short": lambda row: len(first_prompt(row).split()) < 5,
     "too_long": lambda row: len(first_prompt(row).split()) > 2000,
     "empty_reply": lambda row: any(
@@ -29,6 +34,8 @@ RULES = {
         for turn in row.get("conversation", [])
     ),
 }
+
+ALL_RULES = (*RULES, TOXICITY_RULE)
 
 
 def find_parquet_files():
@@ -42,38 +49,46 @@ def find_parquet_files():
     return [str(path) for path in sorted(set(workspace_files + cache_files))]
 
 
-def print_parquet_files():
-    for path in find_parquet_files():
-        print(path)
+# def load_sample(limit=10_000, seed=42, parquet_files=None):
+#     files = parquet_files or find_parquet_files()
+#     if not files:
+#         raise FileNotFoundError("No parquet files found. Download WildChat or pass parquet paths.")
+
+#     rng = random.Random(seed)
+#     dataset = load_dataset("parquet", data_files=files, split="train", streaming=True)
+#     reservoir = []
+#     for index, row in enumerate(dataset):
+#         if index < limit:
+#             reservoir.append(row)
+#         else:
+#             replacement = rng.randint(0, index)
+#             if replacement < limit:
+#                 reservoir[replacement] = row
+
+#     rng.shuffle(reservoir)
+#     return reservoir
 
 
-def load_sample(limit=10_000, seed=42, parquet_files=None):
-    files = parquet_files or find_parquet_files()
-    if not files:
-        raise FileNotFoundError("No parquet files found. Download WildChat or pass parquet paths.")
-
-    rng = random.Random(seed)
-    dataset = load_dataset("parquet", data_files=files, split="train", streaming=True)
-    reservoir = []
-    for index, row in enumerate(dataset):
-        if index < limit:
-            reservoir.append(row)
-        else:
-            replacement = rng.randint(0, index)
-            if replacement < limit:
-                reservoir[replacement] = row
-
-    rng.shuffle(reservoir)
-    return reservoir
-
-
-def classify(rows):
+def classify_rules(rows):
     drops, kept, dropped = Counter(), [], []
     for row in rows:
         hits = [name for rule_name, rule in RULES.items() if rule(row) for name in [rule_name]]
         for hit in hits:
             drops[hit] += 1
-        (dropped if hits else kept).append((row, hits))
+        if hits:
+            dropped.append((row, hits))
+        else:
+            kept.append((row, []))
+    return drops, kept, dropped
+
+
+def classify(rows):
+    drops, eligible, dropped = classify_rules(rows)
+    kept_rows, toxic_rows = filter_toxicity([row for row, _ in eligible])
+    for row in toxic_rows:
+        drops[TOXICITY_RULE] += 1
+        dropped.append((row, [TOXICITY_RULE]))
+    kept = [(row, []) for row in kept_rows]
     return drops, kept, dropped
 
 
@@ -99,7 +114,3 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     run(args.limit, args.seed, args.parquet_files or None)
-
-
-if __name__ == "__main__":
-    ...
