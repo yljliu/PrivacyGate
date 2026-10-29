@@ -29,10 +29,6 @@ RULES = {
     "non_english": lambda row: str(row.get("language") or "").strip().casefold() != "english",
     "too_short": lambda row: len(first_prompt(row).split()) < 5,
     "too_long": lambda row: len(first_prompt(row).split()) > 2000,
-    "empty_reply": lambda row: any(
-        turn.get("role") == "assistant" and not (turn.get("content") or "").strip()
-        for turn in row.get("conversation", [])
-    ),
 }
 
 ALL_RULES = (*RULES, TOXICITY_RULE)

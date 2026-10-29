@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import random
+from collections import Counter
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -46,13 +47,15 @@ def build_candidate_pool(files, pool_size, seed):
     pool = {}        # prompt_key -> row
     pool_slots = []  # slot index -> prompt_key
     seen_keys = set()
+    rule_drops = Counter()
     scanned = passed_rules = passed_keywords = duplicates = 0
     batch = []
 
     def consider_batch(rows):
         nonlocal scanned, passed_rules, passed_keywords, duplicates
         scanned += len(rows)
-        _, kept, _ = classify_rules(rows)
+        drops, kept, _ = classify_rules(rows)
+        rule_drops.update(drops)
         for row, _ in kept:
             passed_rules += 1
             if not keyword_match(first_prompt(row)):
@@ -93,6 +96,9 @@ def build_candidate_pool(files, pool_size, seed):
         "pool_size": len(pool),
     }
     print(f"stage 1 done: {stats}")
+    print("stage 1 filtered by rule:")
+    for rule_name in RULES:
+        print(f"  {rule_name}: {rule_drops[rule_name]:,}")
     return pool, stats
 
 
