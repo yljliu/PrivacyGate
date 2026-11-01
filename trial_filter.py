@@ -3,6 +3,7 @@ import hashlib
 import random
 from collections import Counter
 
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from datasets import load_dataset
@@ -104,7 +105,7 @@ def build_candidate_pool(files, pool_size, seed):
 
 # ---------------------------------------------------------------------------
 # Stage 2: dedupe the pool by text, then run the slow models on a seeded
-# shuffle, stopping once `limit` prompts are accepted.
+# shuffle and collect every accepted prompt.
 # ---------------------------------------------------------------------------
 def select_sample(pool, limit, seed, min_score):
     rows = pool.values() if isinstance(pool, dict) else pool
@@ -115,12 +116,12 @@ def select_sample(pool, limit, seed, min_score):
         unique.setdefault(prompt_key(row), row)
     duplicates_removed = len(pool) - len(unique)
 
-    # 2) Seeded shuffle of the unique prompts so stopping early is a fair random draw.
+    # 2) Seeded shuffle gives the full processing pass a reproducible order.
     keys = list(unique)
     random.Random(seed).shuffle(keys)
 
-    # 3) Toxicity -> zero-shot, batch by batch, until we have enough.
-    accepted = {}
+    # 3) Toxicity -> zero-shot, batch by batch, collecting every accepted row.
+    accepted = pd.DataFrame()
     processed = toxic_removed = category_removed = 0
 
     for start in range(0, len(keys), BATCH_SIZE):
@@ -133,18 +134,17 @@ def select_sample(pool, limit, seed, min_score):
             continue
 
         batch = add_prompt_categories(batch)
+        batch_accepted = []
         for row in batch:
             score = row.get("category_score")  # set in zero_shot.py to enable the threshold
             low_score = score is not None and score < min_score
             if row.get("category") == "something else" or low_score:
                 category_removed += 1
             else:
-                accepted.setdefault(prompt_key(row), row)
+                batch_accepted.append(row)
+        if batch_accepted:
+            accepted = pd.concat([accepted, pd.DataFrame(batch_accepted)], ignore_index=True)
 
-        if len(accepted) >= limit:
-            break
-
-    accepted = dict(list(accepted.items())[:limit])
     stats = {
         "pool_duplicates_removed": duplicates_removed,
         "stage2_processed": processed,
@@ -182,7 +182,7 @@ def main():
     pool, _ = build_candidate_pool(files, args.pool_size, args.seed)
     sample, _ = select_sample(pool, args.limit, args.seed, args.min_score)
 
-    sample_rows = list(sample.values())
+    sample_rows = sample.to_dict(orient="records")
     assert len({prompt_key(r) for r in sample_rows}) == len(sample_rows), "duplicate prompts in sample"
     write_filtered(sample_rows, args.output)
     write_annotator_file(sample_rows, args.annotator_output)

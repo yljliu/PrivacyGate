@@ -88,25 +88,25 @@ def classify(rows):
     return drops, kept, dropped
 
 
-def run(limit=10_000, seed=42, parquet_files=None):
-    sample = load_sample(limit, seed, parquet_files)
-    drops, kept, dropped = classify(sample)
-    files = parquet_files or find_parquet_files()
-    print(f"loaded {len(sample)} rows from {len(files)} parquet file(s)")
-    if not sample:
-        print("No rows loaded.")
-        return sample, drops, kept, dropped
+# def run(limit=10_000, seed=42, parquet_files=None):
+#     sample = load_sample(limit, seed, parquet_files)
+#     drops, kept, dropped = classify(sample)
+#     files = parquet_files or find_parquet_files()
+#     print(f"loaded {len(sample)} rows from {len(files)} parquet file(s)")
+#     if not sample:
+#         print("No rows loaded.")
+#         return sample, drops, kept, dropped
 
-    print(f"kept {len(kept) / len(sample):.1%}")
-    for name, count in drops.most_common():
-        print(f"{name:15s} {count / len(sample):.1%}")
-    return sample, drops, kept, dropped
+#     print(f"kept {len(kept) / len(sample):.1%}")
+#     for name, count in drops.most_common():
+#         print(f"{name:15s} {count / len(sample):.1%}")
+#     return sample, drops, kept, dropped
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Apply WildChat filtering rules to parquet data.")
-    parser.add_argument("parquet_files", nargs="*", help="Parquet paths; cached WildChat shards are used by default.")
-    parser.add_argument("--limit", type=int, default=10_000)
-    parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
-    run(args.limit, args.seed, args.parquet_files or None)
+# def main():
+#     parser = argparse.ArgumentParser(description="Apply WildChat filtering rules to parquet data.")
+#     parser.add_argument("parquet_files", nargs="*", help="Parquet paths; cached WildChat shards are used by default.")
+#     parser.add_argument("--limit", type=int, default=10_000)
+#     parser.add_argument("--seed", type=int, default=42)
+#     args = parser.parse_args()
+#     run(args.limit, args.seed, args.parquet_files or None)
